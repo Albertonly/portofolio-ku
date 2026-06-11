@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from './supabase';
 
 // ─── SVG ICON COMPONENTS ────────────────────────────────────────────
 const IconUser       = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
@@ -174,32 +175,53 @@ export default function AdminDashboard({ onBack }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost/portfolio-api/api.php?action=portfolio');
-      const result = await res.json();
+      // 1. Ambil data dari Supabase
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profile')
+        .select('*')
+        .eq('id', 1)
+        .single();
+
+      if (profileErr) throw profileErr;
+
+      const { data: projData } = await supabase.from('projects').select('*').order('id', { ascending: true });
+      const { data: eduData } = await supabase.from('educations').select('*').order('id', { ascending: true });
+      const { data: expData } = await supabase.from('experiences').select('*').order('id', { ascending: true });
+      const { data: srvData } = await supabase.from('services').select('*').order('id', { ascending: true });
+
+      const result = {
+        ...profileData,
+        projects: projData || [],
+        education: eduData || [],
+        experience: expData || [],
+        services: srvData || []
+      };
+
       setData(result);
+
+      // 2. Mapping data sesuai nama kolom di database (TANPA .contact atau .skills)
       if (result) {
         setProfileForm({
-          nama:      result.nama               || '',
-          about:     result.about              || '',
-          phone:     result.contact?.phone     || '',
-          email:     result.contact?.email     || '',
-          address:   result.contact?.address   || '',
-          github:    result.contact?.github    || '',
-          linkedin:  result.contact?.linkedin  || '',
-          instagram: result.contact?.instagram || '',
-          youtube1:  result.contact?.youtube1  || '',
-          youtube2:  result.contact?.youtube2  || ''
+          nama:      result.nama       || '',
+          about:     result.about      || '',
+          phone:     result.phone      || '',
+          email:     result.email      || '',
+          address:   result.address    || '',
+          github:    result.github     || '',
+          linkedin:  result.linkedin   || '',
+          instagram: result.instagram  || '',
+          youtube1:  result.youtube1   || '',
+          youtube2:  result.youtube2   || ''
         });
-        // Populate skills/software/hobbies dari data yang diambil
-        // App.jsx membaca: result.skills.hard, result.skills.soft, result.software, result.hobbies
-        setHardSkills(Array.isArray(result.skills?.hard) ? result.skills.hard : []);
-        setSoftSkills(Array.isArray(result.skills?.soft) ? result.skills.soft : []);
+
+        // Di Supabase, tipe kolom JSONB akan otomatis di-parse menjadi Array JavaScript
+        setHardSkills(Array.isArray(result.hard_skills) ? result.hard_skills : []);
+        setSoftSkills(Array.isArray(result.soft_skills) ? result.soft_skills : []);
         setSoftware(Array.isArray(result.software) ? result.software : []);
         setHobbies(Array.isArray(result.hobbies) ? result.hobbies : []);
       }
-    } catch {
-      setMessage({ text: 'Gagal mengambil data dari server', type: 'error' });
-      setTimeout(() => setMessage({ text: '', type: '' }), 3500);
+    } catch (err) {
+      setMessage({ text: 'Gagal mengambil data dari Supabase: ' + err.message, type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -272,25 +294,23 @@ export default function AdminDashboard({ onBack }) {
   const handleSkillsSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost/portfolio-api/api.php?action=update_skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Update langsung ke tabel profile dengan tipe JSONB (Supabase otomatis handle object/array ke JSONB)
+      const { error } = await supabase
+        .from('profile')
+        .update({
           hard_skills: hardSkills,
           soft_skills: softSkills,
-          software:    software,
-          hobbies:     hobbies,
+          software: software,
+          hobbies: hobbies
         })
-      });
-      const result = await res.json();
-      if (result.success) {
-        showMessage('Skills, Software & Hobbies berhasil disimpan!', 'success');
-        fetchData();
-      } else {
-        showMessage('Gagal menyimpan: ' + (result.error || ''), 'error');
-      }
-    } catch {
-      showMessage('Terjadi kesalahan jaringan', 'error');
+        .eq('id', 1);
+
+      if (error) throw error;
+
+      showMessage('Skills, Software & Hobbies berhasil disimpan!', 'success');
+      fetchData();
+    } catch (err) {
+      showMessage('Gagal menyimpan: ' + err.message, 'error');
     }
   };
 
@@ -317,39 +337,42 @@ export default function AdminDashboard({ onBack }) {
   };
 
   // ── Generic Save & Delete ───────────────────────────────────────────
-  const handleSaveItem = async (endpoint, payload, resetForm) => {
+  // Mengganti API localhost untuk aksi Simpan (Create/Update)
+  const handleSaveItem = async (tableName, payload, resetForm, idField = 'id') => {
     try {
-      const res = await fetch(`http://localhost/portfolio-api/api.php?action=${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const result = await res.json();
-      if (result.success) {
-        showMessage('Data berhasil disimpan!', 'success');
-        resetForm();
-        fetchData();
+      const isEdit = payload[idField] !== null;
+      let response;
+
+      if (isEdit) {
+        // Mode Update
+        response = await supabase.from(tableName).update(payload).eq(idField, payload[idField]);
       } else {
-        showMessage('Gagal menyimpan data: ' + (result.error || ''), 'error');
+        // Mode Insert: buang properti ID yang null agar Supabase menggunakan auto-increment
+        const { [idField]: removedId, ...insertData } = payload;
+        response = await supabase.from(tableName).insert([insertData]);
       }
-    } catch {
-      showMessage('Terjadi kesalahan jaringan', 'error');
+
+      if (response.error) throw response.error;
+
+      showMessage('Data berhasil disimpan!', 'success');
+      resetForm();
+      fetchData();
+    } catch (err) {
+      showMessage('Gagal menyimpan data: ' + err.message, 'error');
     }
   };
 
-  const handleDeleteItem = async (endpoint, id) => {
+  // Mengganti API localhost untuk aksi Hapus (Delete)
+  const handleDeleteItem = async (tableName, id, idField = 'id') => {
     if (!window.confirm('Apakah Anda yakin ingin menghapus data ini?')) return;
     try {
-      const res = await fetch(`http://localhost/portfolio-api/api.php?action=${endpoint}&id=${id}`);
-      const result = await res.json();
-      if (result.success) {
-        showMessage('Data berhasil dihapus!', 'success');
-        fetchData();
-      } else {
-        showMessage('Gagal menghapus data', 'error');
-      }
-    } catch {
-      showMessage('Terjadi kesalahan jaringan', 'error');
+      const { error } = await supabase.from(tableName).delete().eq(idField, id);
+      if (error) throw error;
+
+      showMessage('Data berhasil dihapus!', 'success');
+      fetchData();
+    } catch (err) {
+      showMessage('Gagal menghapus data: ' + err.message, 'error');
     }
   };
 
@@ -893,9 +916,10 @@ export default function AdminDashboard({ onBack }) {
                             ? projectForm.tech.split(',').map(t => t.trim()).filter(Boolean)
                             : projectForm.tech;
                           handleSaveItem(
-                            'save_project',
+                            'projects',
                             { ...projectForm, tech: techArray },
-                            () => setProjectForm({ project_id: null, title: '', role: '', time: '', tech: '', description: '', link: '' })
+                            () => setProjectForm({ project_id: null, title: '', role: '', time: '', tech: '', description: '', link: '' }),
+                            'project_id'
                           );
                         }}
                         className="flex flex-col gap-4"
@@ -935,7 +959,7 @@ export default function AdminDashboard({ onBack }) {
                                 time: p.time, tech: Array.isArray(p.tech) ? p.tech.join(', ') : (p.tech || ''),
                                 description: p.description, link: p.link
                               })}
-                              onDelete={() => handleDeleteItem('delete_project', p.project_id)}
+                              onDelete={() => handleDeleteItem('projects', p.project_id, 'project_id')}
                             >
                               <h4 className="font-bold text-slate-800 text-sm">{p.title}</h4>
                               <p className="text-xs text-slate-500 mt-0.5">{p.role} · {p.time}</p>
@@ -965,7 +989,7 @@ export default function AdminDashboard({ onBack }) {
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
-                          handleSaveItem('save_education', educationForm, () => setEducationForm({ id: null, year: '', institution: '', detail: '' }));
+                          handleSaveItem('educations', educationForm, () => setEducationForm({ id: null, year: '', institution: '', detail: '' }));
                         }}
                         className="flex flex-col gap-4"
                       >
@@ -1011,7 +1035,7 @@ export default function AdminDashboard({ onBack }) {
                             <ItemCard
                               key={e.id}
                               onEdit={() => setEducationForm({ id: e.id, year: e.year, institution: e.institution, detail: e.detail })}
-                              onDelete={() => handleDeleteItem('delete_education', e.id)}
+                              onDelete={() => handleDeleteItem('educations', e.id)}
                             >
                               <h4 className="font-bold text-slate-800 text-sm">{e.institution}</h4>
                               <p className="text-xs text-slate-500 mt-0.5">{e.year} · {e.detail}</p>
@@ -1033,7 +1057,7 @@ export default function AdminDashboard({ onBack }) {
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
-                          handleSaveItem('save_experience', experienceForm, () => setExperienceForm({ id: null, time: '', role: '', company: '', description: '' }));
+                          handleSaveItem('experiences', experienceForm, () => setExperienceForm({ id: null, time: '', role: '', company: '', description: '' }));
                         }}
                         className="flex flex-col gap-4"
                       >
@@ -1087,7 +1111,7 @@ export default function AdminDashboard({ onBack }) {
                             <ItemCard
                               key={ex.id}
                               onEdit={() => setExperienceForm({ id: ex.id, time: ex.time || ex.year, role: ex.role, company: ex.company, description: ex.description || ex.desc })}
-                              onDelete={() => handleDeleteItem('delete_experience', ex.id)}
+                              onDelete={() => handleDeleteItem('experiences', ex.id)}
                             >
                               <h4 className="font-bold text-slate-800 text-sm">{ex.role}</h4>
                               <p className="text-xs text-indigo-600 font-medium mt-0.5">{ex.company}</p>
@@ -1110,7 +1134,7 @@ export default function AdminDashboard({ onBack }) {
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
-                          handleSaveItem('save_service', serviceForm, () => setServiceForm({ id: null, title: '', description: '' }));
+                          handleSaveItem('services', serviceForm, () => setServiceForm({ id: null, title: '', description: '' }));
                         }}
                         className="flex flex-col gap-4"
                       >
@@ -1148,7 +1172,7 @@ export default function AdminDashboard({ onBack }) {
                             <ItemCard
                               key={s.id}
                               onEdit={() => setServiceForm({ id: s.id, title: s.title, description: s.description || s.desc })}
-                              onDelete={() => handleDeleteItem('delete_service', s.id)}
+                              onDelete={() => handleDeleteItem('services', s.id)}
                             >
                               <h4 className="font-bold text-slate-800 text-sm">{s.title}</h4>
                               <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{s.description || s.desc}</p>
