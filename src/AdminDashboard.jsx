@@ -117,9 +117,10 @@ function TagPill({ label, onDelete }) {
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────
 export default function AdminDashboard({ onBack }) {
   // Auth State
-  const [isAuthenticated, setIsAuthenticated] = useState(!!sessionStorage.getItem('admin_token'));
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Master Data State
   const [data, setData] = useState(null);
@@ -228,33 +229,45 @@ export default function AdminDashboard({ onBack }) {
   }, [setLoading, setData, setProfileForm, setHardSkills, setSoftSkills, setSoftware, setHobbies]);
 
   useEffect(() => {
+    // Cek sesi saat halaman pertama kali dimuat
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setIsAuthenticated(true);
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated) fetchData();
   }, [isAuthenticated, fetchData]);
 
   // ── Authentication ──────────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
-    try {
-      const res = await fetch('http://localhost/portfolio-api/api.php?action=login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const result = await res.json();
-      if (result.success) {
-        sessionStorage.setItem('admin_token', result.token);
-        setIsAuthenticated(true);
-        showMessage('Login berhasil! Selamat datang.', 'success');
-      } else {
-        showMessage(result.message || 'Username atau password salah.', 'error');
-      }
-    } catch {
-      showMessage('Gagal terhubung ke server autentikasi', 'error');
+    setErrorMsg(''); // Bersihkan pesan error sebelumnya jika ada
+
+    // Supabase Auth menggunakan Email, bukan sekadar Username.
+    // Pastikan input yang tadinya buat 'username' diisi dengan Email yang kamu daftarkan di Supabase.
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: username, // Asumsi state kamu namanya 'username', tapi isinya harus email
+      password: password,
+    });
+
+    if (error) {
+      // Jika password/email salah
+      setErrorMsg('Gagal login: Email atau password salah.');
+      console.error("Error Auth:", error.message);
+    } else {
+      // Jika berhasil masuk
+      setIsAuthenticated(true);
     }
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('admin_token');
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setIsAuthenticated(false);
     if (onBack) onBack();
   };
@@ -391,10 +404,10 @@ export default function AdminDashboard({ onBack }) {
           </div>
 
           {/* Alert */}
-          {message.text && (
-            <div className={`flex items-center gap-2 p-3 rounded-xl text-sm font-medium mb-5 ${message.type === 'success' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
-              {message.type === 'success' ? <IconCheck /> : <IconX />}
-              {message.text}
+          {errorMsg && (
+            <div className="flex items-center gap-2 p-3 rounded-xl text-sm font-medium mb-5 bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              <IconX />
+              {errorMsg}
             </div>
           )}
 
@@ -402,11 +415,11 @@ export default function AdminDashboard({ onBack }) {
           <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-7 shadow-2xl">
             <form onSubmit={handleLogin} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Username</label>
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Email</label>
                 <input
-                  required type="text" value={username}
+                  required type="email" value={username}
                   onChange={e => setUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder="admin@email.com"
                   className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-500 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/20 transition-all"
                 />
               </div>
