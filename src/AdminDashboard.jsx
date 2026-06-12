@@ -262,30 +262,72 @@ export default function AdminDashboard({ onBack }) {
   };
 
   // ── Profile Submit ──────────────────────────────────────────────────
+  // ── Profile Submit (Versi Supabase) ─────────────────────────────────
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
-    const formData = new FormData();
-    Object.keys(profileForm).forEach(key => formData.append(key, profileForm[key]));
-    if (fotoProfileFile)  formData.append('foto_profile', fotoProfileFile);
-    if (resumeEnFile)     formData.append('resume', resumeEnFile);           // field "resume" untuk EN
-    if (resumeIdFile)     formData.append('resume_id', resumeIdFile);        // field "resume_id" untuk ID
     try {
-      const res = await fetch('http://localhost/portfolio-api/api.php?action=update_profile', {
-        method: 'POST',
-        body: formData
-      });
-      const result = await res.json();
-      if (result.success) {
-        showMessage('Profile & semua berkas berhasil diperbarui!', 'success');
-        setFotoProfileFile(null);
-        setResumeEnFile(null);
-        setResumeIdFile(null);
-        fetchData();
-      } else {
-        showMessage('Gagal memperbarui profile: ' + (result.error || ''), 'error');
+      // 1. Siapkan data teks yang akan di-update
+      let updateData = {
+        nama: profileForm.nama,
+        about: profileForm.about,
+        phone: profileForm.phone,
+        email: profileForm.email,
+        address: profileForm.address,
+        github: profileForm.github,
+        linkedin: profileForm.linkedin,
+        instagram: profileForm.instagram,
+        youtube1: profileForm.youtube1,
+        youtube2: profileForm.youtube2
+      };
+
+      // Fungsi bantuan untuk upload file ke Supabase Storage
+      const uploadToSupabase = async (file, folderName) => {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const filePath = `${folderName}/${fileName}`;
+
+        // Upload ke bucket bernama 'portfolio_media'
+        const { error: uploadError } = await supabase.storage
+          .from('portfolio_media') 
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        // Ambil Public URL dari file yang baru diupload
+        const { data: publicUrlData } = supabase.storage
+          .from('portfolio_media')
+          .getPublicUrl(filePath);
+
+        return publicUrlData.publicUrl;
+      };
+
+      // 2. Cek dan upload file jika ada yang baru dipilih
+      if (fotoProfileFile) {
+        updateData.foto_profile = await uploadToSupabase(fotoProfileFile, 'profiles');
       }
-    } catch {
-      showMessage('Terjadi kesalahan jaringan', 'error');
+      if (resumeEnFile) {
+        updateData.resume = await uploadToSupabase(resumeEnFile, 'resumes');
+      }
+      if (resumeIdFile) {
+        updateData.resume_id = await uploadToSupabase(resumeIdFile, 'resumes');
+      }
+
+      // 3. Update data (teks & URL file) ke tabel 'profile'
+      const { error } = await supabase
+        .from('profile')
+        .update(updateData)
+        .eq('id', 1);
+
+      if (error) throw error;
+
+      showMessage('Profile & semua berkas berhasil diperbarui!', 'success');
+      setFotoProfileFile(null);
+      setResumeEnFile(null);
+      setResumeIdFile(null);
+      fetchData(); // Refresh data di layar
+
+    } catch (err) {
+      showMessage('Gagal memperbarui: ' + err.message, 'error');
     }
   };
 
