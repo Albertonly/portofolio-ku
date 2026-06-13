@@ -124,19 +124,19 @@ function App() {
     );
   }
 
-  // Resolusi Tautan File Dinamis dari Database Storage
+  /// Resolusi Tautan File Dinamis dari Database Storage (Supabase)
   const profilePicUrl = dataDiri?.foto_profile
-    ? `http://localhost/portfolio-api/uploads/profile/${dataDiri.foto_profile}`
+    ? dataDiri.foto_profile
     : "/foto-profil.jpg"; // Fallback ke lokal jika API tidak ada
 
   // Resume Bahasa Inggris: dari DB jika ada, fallback ke file lokal
   const resumeEnUrl = dataDiri?.resume
-    ? `http://localhost/portfolio-api/uploads/resume/${dataDiri.resume}`
+    ? dataDiri.resume
     : "/Muhamad Elgar Resume en.pdf";
 
   // Resume Bahasa Indonesia: dari DB jika ada (field resume_id), fallback ke file lokal
   const resumeIdUrl = dataDiri?.resume_id
-    ? `http://localhost/portfolio-api/uploads/resume/${dataDiri.resume_id}`
+    ? dataDiri.resume_id
     : "/muhamad Elgar Resume Id.pdf";
 
   // Setelah data berhasil diambil, baru pisahkan namanya
