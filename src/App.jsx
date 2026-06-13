@@ -257,8 +257,8 @@ function App() {
                 src={profilePicUrl}
                 alt={dataDiri?.nama}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-in-out"
-                onError={(e) => {
-                  e.target.src = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=800&auto=format&fit=crop";
+                /* onError={(e) => {
+                  e.target.src = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?q=80&w=800&auto=format&fit=crop";*/
                 }}
               />
             </div>
